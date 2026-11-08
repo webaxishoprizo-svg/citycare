@@ -87,6 +87,16 @@ export interface ApiAppointment {
   created_at: string;
 }
 
+export interface ChatQuickReply {
+  label: string;
+  actionUrl?: string;
+}
+
+export interface ChatResponse {
+  reply: string;
+  quickReplies?: ChatQuickReply[];
+}
+
 interface ApiResponse<T> {
   success: boolean;
   data?: T;
@@ -192,5 +202,20 @@ export const erpApi = {
       }),
     });
     return res.data.appointment;
+  },
+
+  // Query iRIS AI Chat Gateway (dynamically fetched from ERP irisxe gateway)
+  async chat(message: string): Promise<ChatResponse> {
+    const res = await request<{
+      success: boolean;
+      data: ChatResponse;
+    }>('/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        message,
+        source: 'patient',
+      }),
+    });
+    return res.data;
   },
 };

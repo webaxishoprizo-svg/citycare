@@ -271,88 +271,89 @@ function IrisLogo({ size = 24 }: { size?: number }) {
 }
 
 function ChatWidget({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { doctors, departments, clinic } = useClinic();
+  const { clinic } = useClinic();
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      from: 'bot',
-      text: `Hello, I'm iRIS, your patient assistant at ${clinic.name}. I can help you find a doctor, explore our departments, or book an appointment.`,
-      quickReplies: [
-        { label: 'Book an appointment', action: () => navigate('/appointments/book') },
-        { label: 'Find a doctor', action: () => navigate('/doctors') },
-        { label: 'Explore departments', action: () => navigate('/departments') },
-      ],
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Dynamically fetch live AI greeting from Iris AI when chat is opened
+  useEffect(() => {
+    if (open && messages.length === 0) {
+      setIsTyping(true);
+      erpApi
+        .chat('init')
+        .then((res) => {
+          setMessages([
+            {
+              from: 'bot',
+              text: res.reply,
+              quickReplies: res.quickReplies?.map((qr) => ({
+                label: qr.label,
+                action: () => qr.actionUrl && navigate(qr.actionUrl),
+              })),
+            },
+          ]);
+        })
+        .catch(() => {
+          setMessages([
+            {
+              from: 'bot',
+              text: 'Hello! I am iRIS, your CityCare Hospital Patient Assistant. How can I help you today?',
+              quickReplies: [
+                { label: 'Book an appointment', action: () => navigate('/appointments/book') },
+                { label: 'Find a doctor', action: () => navigate('/doctors') },
+                { label: 'Explore departments', action: () => navigate('/departments') },
+              ],
+            },
+          ]);
+        })
+        .finally(() => setIsTyping(false));
+    }
+  }, [open, messages.length]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, isTyping]);
 
-  const botReply = (text: string): ChatMessage[] => {
-    const lower = text.toLowerCase();
-    if (lower.includes('book') || lower.includes('appointment') || lower.includes('schedule')) {
-      return [{
-        from: 'bot',
-        text: `You can book an appointment in seconds. We show real-time available doctor slots directly synced with ${clinic.name} ERP. Would you like to pick a time?`,
-        quickReplies: [{ label: 'Book appointment now', action: () => navigate('/appointments/book') }, { label: 'See all doctors', action: () => navigate('/doctors') }],
-      }];
-    }
-    for (const doc of doctors) {
-      const docLower = doc.name.toLowerCase();
-      const specLower = doc.specialty.toLowerCase();
-      if (lower.includes(docLower) || lower.includes(doc.name.split(' ').pop()!.toLowerCase()) || lower.includes(specLower)) {
-        return [{
-          from: 'bot',
-          text: `${doc.name} is our specialist in ${doc.department} (${doc.qualification}, ${doc.experience}). Consultation fee is ${doc.fee}. Would you like to view profile or book?`,
-          quickReplies: [
-            { label: `View ${doc.name}`, action: () => navigate(`/doctors/${doc.id}`) },
-            { label: 'Book appointment', action: () => navigate(`/appointments/book?doctor=${doc.id}`) },
-          ],
-        }];
-      }
-    }
-    for (const dep of departments) {
-      if (lower.includes(dep.name.toLowerCase())) {
-        return [{
-          from: 'bot',
-          text: `Our ${dep.name} department offers comprehensive care with ${dep.count}.`,
-          quickReplies: [
-            { label: `Book in ${dep.name}`, action: () => navigate(`/appointments/book?dept=${encodeURIComponent(dep.name)}`) },
-            { label: 'View all departments', action: () => navigate('/departments') },
-          ],
-        }];
-      }
-    }
-    if (lower.includes('hour') || lower.includes('open') || lower.includes('where') || lower.includes('address')) {
-      return [{
-        from: 'bot',
-        text: `We are located at ${clinic.address}. Operating hours are Mon–Sat from ${clinic.opening_time} to ${clinic.closing_time}. Phone: ${clinic.phone}.`,
-        quickReplies: [{ label: 'Contact page', action: () => navigate('/contact') }],
-      }];
-    }
-    return [{
-      from: 'bot',
-      text: `I'm happy to help! You can browse our ${doctors.length} doctors, explore departments, or book an appointment online with instant confirmation.`,
-      quickReplies: [
-        { label: 'Find a doctor', action: () => navigate('/doctors') },
-        { label: 'Book appointment', action: () => navigate('/appointments/book') },
-      ],
-    }];
-  };
-
-  const send = (text = input) => {
-    if (!text.trim()) return;
-    const userMsg: ChatMessage = { from: 'user', text };
+  const send = async (text = input) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const userMsg: ChatMessage = { from: 'user', text: trimmed };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsTyping(true);
-    setTimeout(() => {
-      setMessages(prev => [...prev, ...botReply(text)]);
+
+    try {
+      const response = await erpApi.chat(trimmed);
+      const botMsg: ChatMessage = {
+        from: 'bot',
+        text: response.reply,
+        quickReplies: response.quickReplies?.map(qr => ({
+          label: qr.label,
+          action: () => {
+            if (qr.actionUrl) {
+              navigate(qr.actionUrl);
+            }
+          },
+        })),
+      };
+      setMessages(prev => [...prev, botMsg]);
+    } catch {
+      setMessages(prev => [
+        ...prev,
+        {
+          from: 'bot',
+          text: `I'm having trouble connecting to the CityCare AI assistant gateway right now. You can book an appointment or browse our doctors directly.`,
+          quickReplies: [
+            { label: 'Book an appointment', action: () => navigate('/appointments/book') },
+            { label: 'Find a doctor', action: () => navigate('/doctors') },
+          ],
+        },
+      ]);
+    } finally {
       setIsTyping(false);
-    }, 500);
+    }
   };
 
   if (!open) return null;
